@@ -141,21 +141,23 @@ AI Renaissance 要做的，不是再造一座封闭的量化圣殿。而是把�
 
 ---
 
-## 当前状态（2026-05-11）
+## 当前状态（2026-05-23）
 
 项目还在早期建设阶段，README 前面的内容是目标架构，不代表所有能力都已经完成。
 
 | 模块 | 当前状态 |
 |------|----------|
-| Agent / Signal 基础框架 | 已有 AgentScope 2.0 `reply()` 边界的 `BaseAgent`、统一 `Signal`、专家 Agent 目录和主流程注册表 |
-| Orchestrator | 已有编排 Agent 和仲裁引擎，可以收集专家 Signal 并跑通初步仲裁流程 |
-| 舆情 Agent | 已有初步实现，能编排大盘情绪、行业景气和东方财富股吧数据，输出舆情类 Signal |
-| 财务/技术/资金/宏观/行业/风险 Agent | 目前主要是接入骨架和占位输出，专业判断逻辑还需要各专家组继续补齐 |
-| 数据层 | 已有东方财富、股吧、巨潮、AkShare、市场情绪等数据源模块，字段稳定性和覆盖范围仍需联调 |
-| CI | 已接入依赖检查、pytest、compileall、专家 Agent 契约检查、Orchestrator 仲裁契约检查、AgentScope 消息桥检查和 BaseAgent 原生调用检查 |
+| Agent / Signal 基础框架 | 已有 AgentScope 2.0 `reply()` 边界的 `BaseAgent`、统一 `Signal`、专家 Agent 注册表和主流程调用链路 |
+| Orchestrator | 已有编排 Agent、仲裁引擎、执行追踪和 AgentScope 消息调用链路 |
+| 舆情 Agent | 已有业务实现，能编排大盘情绪、行业情绪和东方财富股吧数据，输出舆情类 Signal |
+| 宏观 Agent | 已有 7 层宏观分析流水线和推理链，可离线返回 macro Signal；当前使用基于 2024-06-28 真实宏观数据整理的固定样本 |
+| 技术 Agent | 已接入 `traditional_model_fusion`、`volume_price_reversal` 和 `company_evolution_analysis`，可通过真实/注入 OHLCV 数据输出 technical Signal |
+| 财务/资金/行业/风险 Agent | 当前能接入主流程并返回标准 Signal；`FinancialAgent`、`FundflowAgent`、`IndustryAgent`、`RiskAgent` 的 `analyze()` 仍返回占位 neutral Signal |
+| 数据层 | 已有东方财富、股吧、市场情绪、行业情绪、巨潮、AkShare、Market OHLCV、腾讯行情等数据源模块 |
+| CI | 已接入依赖检查、pytest、compileall、专家 Agent 契约检查、Orchestrator 仲裁契约检查、AgentScope 消息桥检查和 BaseAgent 原生调用检查；当前 compileall 覆盖 `main.py`、`agents`、`data_sources`、`debug_ui`、`samples`、`tests`，不代表所有 `skills/` 下的实验脚本都会被编译或执行 |
 | AgentScope | `BaseAgent` 已提供 AgentScope 2.0 `reply()` 消息边界；Orchestrator 通过 AgentScope `Msg` 调用专家 Agent，并可把仲裁结果包装为 AgentScope `Msg` |
 
-近期更现实的目标是：先让各专家 Agent 以离线可测的方式稳定返回 `Signal`，再逐步补齐专业规则、数据源和仲裁逻辑。
+下一阶段重点是：在保持统一运行契约稳定的前提下，继续补齐各专家 Agent 的业务逻辑、实时数据源和信号有效性验证。
 
 ---
 
@@ -195,7 +197,7 @@ Medallion 的秘密从来不是某个公式，而是一个组织——一群顶�
 
 - 新成员：先看 `docs/GIT_WORKFLOW.md`、`docs/CODING_AGENT_GUIDE.md` 和 `samples/README.md`
 - 专家组：先看 `docs/ANALYSIS_SKILL_TEMPLATE.md`、`skills/examples/cash_flow_quality_check/SKILL.md`、`skills/expert_skill_authoring/SKILL.md`
-- 开发1组：关注 Agent 基类、Skill 注册机制、Signal 规范、目录规范
+- 开发1组：关注 Agent 基类、Signal 规范、AgentScope 消息边界、Skill 注册机制、目录规范
 - 开发2组：关注 Orchestrator Agent、仲裁引擎、信号汇总、主流程调度
 - 开发3组：先看 `docs/DATA_SKILL_TEMPLATE.md`，关注 `data_sources/` 数据源封装和 `skills/data/` 数据接口说明
 
@@ -254,57 +256,17 @@ skills/{domain}/{skill_name}/SKILL.md
 ```
 AIRenaissance/
 ├── agents/                        # 8 Agent 扁平结构
-│   ├── __init__.py
-│   ├── base.py                    # Agent 基类（含 Skill 加载）
-│   ├── signal.py                  # 统一信号格式
-│   ├── registry.py                # Skill 注册机制
-│   ├── orchestrator/              # 编排 Agent（开发2组）
-│   │   ├── __init__.py
-│   │   ├── agent.py               # Orchestrator Agent
-│   │   └── arbitration.py         # 仲裁引擎
-│   ├── financial/                 # 财务分析 Agent（专家1组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   ├── technical/                 # 技术指标 Agent（专家2组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   ├── fundflow/                  # 资金流向 Agent（专家3组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   ├── macro/                     # 宏观周期 Agent（专家4组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   ├── industry/                  # 行业景气 Agent（专家5组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   ├── news_agent/                # 舆情情感 Agent（专家6组）
-│   │   ├── __init__.py
-│   │   └── agent.py
-│   └── risk/                      # 风险预警 Agent（专家7组）
-│       ├── __init__.py
-│       └── agent.py
+│   ├── base.py                    # Agent 基类（AgentScope-native）
+│   ├── signal.py                  # 统一 Signal
+│   ├── registry.py                # 专家 Agent 注册表
+│   ├── orchestrator/              # 编排 Agent 和仲裁逻辑
+│   └── {financial,technical,fundflow,macro,industry,news_agent,risk}/
 │
-├── data_sources/                  # 数据执行层（开发3组）
-│   ├── __init__.py
-│   ├── base.py                    # 数据源基类
-│   ├── eastmoney.py               # 东方财富财报数据源
-│   └── eastmoney_guba.py          # 东方财富股吧数据源
+├── data_sources/                  # 数据执行层
 │
 ├── skills/                        # Skill 目录（专家分析 + 数据接口说明）
-│   ├── data/                      # 数据接口说明 Skill（开发3组）
-│   │   └── eastmoney_guba/
-│   │       └── SKILL.md
-│   ├── financial/                 # 财务类 Skill（专家1组）
-│   │   └── financial_report_analysis/
-│   │       └── SKILL.md
-│   ├── technical/                 # 技术类 Skill（专家2组）
-│   ├── fundflow/                  # 资金类 Skill（专家3组）
-│   ├── macro/                     # 宏观类 Skill（专家4组）
-│   ├── industry/                  # 行业类 Skill（专家5组）
-│   ├── news/                      # 舆情类 Skill（专家6组）
-│   │   └── market_emotion_discovery/
-│   │       └── SKILL.md
-│   ├── risk/                      # 风控类 Skill（专家7组）
+│   ├── data/                      # 数据接口说明 Skill
+│   ├── {financial,technical,fundflow,macro,industry,news,risk}/
 │   ├── examples/                  # 示例 Skill
 │   └── expert_skill_authoring/    # 写 Skill 的 Skill
 │
@@ -322,12 +284,10 @@ AIRenaissance/
 │   ├── README.md
 │   └── agent_run_check_sample.py
 │
-├── tests/                         # 基础测试、专家 Agent 契约检查、Orchestrator 仲裁契约检查和 AgentScope 边界检查
-│   ├── test_base_agent_agentscope.py
-│   ├── test_agentscope_message_bridge.py
-│   ├── test_arbitration_contract.py
-│   ├── test_expert_agent_contract.py
-│   └── test_orchestrator_scope.py
+├── tests/                         # pytest 测试目录
+│   ├── test_*.py                  # 跨 Agent 契约、Orchestrator、AgentScope 和共享基础设施测试
+│   ├── technical/                 # 技术领域 Agent / Skill runtime / 模型测试
+│   └── data_sources/              # 数据源测试
 │
 ├── .github/                       # PR 模板和 CI 工作流
 │   ├── PULL_REQUEST_TEMPLATE.md
@@ -339,6 +299,8 @@ AIRenaissance/
 └── README.md
 ```
 
+测试目录约定：`tests/` 根目录只放跨 Agent 契约、Orchestrator、AgentScope 和共享基础设施测试；单个领域的 Agent / Skill runtime / 模型测试放到 `tests/{domain}/`；数据源测试放到 `tests/data_sources/`；不要把 CI 需要执行的正式测试放到 `skills/**/tests/`。
+
 ---
 
 ## 团队协作
@@ -347,7 +309,7 @@ AIRenaissance/
 
 | 组 | 组长 | 核心职责 |
 |---|---|---|
-| 开发1组（架构） | 荒唐 | 维护 Agent 基类、Signal 规范、Skill 注册机制、Git 工作流 |
+| 开发1组（架构） | 荒唐 | 维护 Agent 基类、Signal 规范、AgentScope 消息边界、Skill 注册机制、Git 工作流 |
 | 开发2组（功能） | pkm | 实现 Orchestrator Agent、仲裁引擎、信号汇总、推理链生成、主流程调度 |
 | 开发3组（数据） | 过去，未来 | 统一封装数据源（data_sources/），维护数据接口说明（skills/data/），让 Agent 只管编排和分析 |
 | 专家1组（财务） | 简简简水粽 | 维护财务分析 Agent，编写 financial 类 Skill，七步验证链 |

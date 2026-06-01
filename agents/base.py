@@ -8,6 +8,8 @@ Agent基类 - 所有Agent的父类
   - Orchestrator Agent 不加载 Skill，负责编排仲裁
 """
 
+from __future__ import annotations
+
 import asyncio
 from typing import Optional, Dict, Any, List
 from pathlib import Path

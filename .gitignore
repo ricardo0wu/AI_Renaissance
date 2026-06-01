@@ -31,6 +31,7 @@ logs/
 # IDEs
 .vscode/
 .idea/
+.codebuddy/
 *.swp
 *.swo
 *~
