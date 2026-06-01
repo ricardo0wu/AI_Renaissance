@@ -2,7 +2,7 @@
 Agent基类 - 所有Agent的父类
 
 8 Agent + N Skill 架构下：
-  - 每个 Agent 原生继承 AgentScope AgentBase，可通过 Msg 调用
+  - 每个 Agent 暴露 AgentScope 2.0 reply() 消息边界
   - 每个 Agent 可通过 load_skill() 动态加载 Skill
   - 每个 Agent 有 signal_type 属性，标识输出信号类型
   - Orchestrator Agent 不加载 Skill，负责编排仲裁
@@ -12,7 +12,6 @@ import asyncio
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from loguru import logger
-from agentscope.agent import AgentBase as AgentScopeAgentBase
 
 from agents.agentscope_message import (
     AgentScopeMessageError,
@@ -26,9 +25,9 @@ class AgentContractError(RuntimeError):
     """Raised when an Agent violates the project-level Signal contract."""
 
 
-class BaseAgent(AgentScopeAgentBase):
+class BaseAgent:
     """
-    所有 Agent 的基类，同时也是 AgentScope-native Agent。
+    所有 Agent 的项目基类，同时提供 AgentScope 2.0 消息边界。
 
     子类需要实现:
     - name: Agent名称
@@ -47,7 +46,6 @@ class BaseAgent(AgentScopeAgentBase):
         if self.__class__.analyze is BaseAgent.analyze:
             raise TypeError(f"{self.__class__.__name__} must implement analyze()")
 
-        super().__init__()
         self.name = name
         self.config = config or {}
         self._skills: Dict[str, str] = {}  # skill_name -> skill_content

@@ -26,12 +26,34 @@ class AgentScopeMessageError(ValueError):
     """Raised when an AgentScope message cannot satisfy project contracts."""
 
 
-def _msg_class():
+def _create_msg(
+    *,
+    name: str,
+    role: str,
+    content: str,
+    metadata: Dict[str, Any],
+    msg_class: Optional[Any] = None,
+):
+    if msg_class is not None:
+        return msg_class(
+            name=name,
+            role=role,
+            content=content,
+            metadata=metadata,
+        )
+
     try:
-        from agentscope.message import Msg
-    except Exception as exc:  # pragma: no cover - depends on optional runtime import
-        raise AgentScopeMessageError(f"AgentScope Msg is unavailable: {exc}") from exc
-    return Msg
+        from agentscope.message import AssistantMsg, SystemMsg, UserMsg
+    except Exception as exc:  # pragma: no cover - depends on AgentScope runtime import
+        raise AgentScopeMessageError(f"AgentScope message helpers are unavailable: {exc}") from exc
+
+    if role == "user":
+        return UserMsg(name=name, content=content, metadata=metadata)
+    if role == "assistant":
+        return AssistantMsg(name=name, content=content, metadata=metadata)
+    if role == "system":
+        return SystemMsg(name=name, content=content, metadata=metadata)
+    raise AgentScopeMessageError(f"Unsupported AgentScope message role: {role}")
 
 
 def _metadata(msg: Any) -> Dict[str, Any]:
@@ -55,18 +77,18 @@ def stock_task_to_msg(
     if not code:
         raise AgentScopeMessageError("stock_code is required")
 
-    Msg = msg_class or _msg_class()
     metadata = {
         MESSAGE_TYPE_METADATA_KEY: STOCK_ANALYSIS_TASK_MESSAGE_TYPE,
         TASK_METADATA_KEY: DEFAULT_STOCK_ANALYSIS_TASK,
         STOCK_CODE_METADATA_KEY: code,
         "context": context or {},
     }
-    return Msg(
+    return _create_msg(
         name=name,
         role="user",
         content=f"Analyze stock {code}",
         metadata=metadata,
+        msg_class=msg_class,
     )
 
 
@@ -80,8 +102,7 @@ def signal_to_msg(
     if not isinstance(signal, Signal):
         raise AgentScopeMessageError(f"Expected Signal, got {type(signal).__name__}")
 
-    Msg = msg_class or _msg_class()
-    return Msg(
+    return _create_msg(
         name=name or signal.source or signal.signal_type or "ExpertAgent",
         role="assistant",
         content=signal.reasoning,
@@ -91,6 +112,7 @@ def signal_to_msg(
             "signal_type": signal.signal_type,
             "source": signal.source,
         },
+        msg_class=msg_class,
     )
 
 
@@ -130,9 +152,8 @@ def arbitration_result_to_msg(
             f"Expected ArbitrationResult-like object, missing fields: {missing}",
         )
 
-    Msg = msg_class or _msg_class()
     data = {field: getattr(result, field) for field in required_fields}
-    return Msg(
+    return _create_msg(
         name=name,
         role="assistant",
         content=result.reasoning,
@@ -143,6 +164,7 @@ def arbitration_result_to_msg(
             "decision": result.decision,
             "direction": result.direction,
         },
+        msg_class=msg_class,
     )
 
 

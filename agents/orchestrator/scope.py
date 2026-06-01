@@ -132,7 +132,7 @@ class AgentScopeOrchestrationRunner:
     """
     OrchestratorAgent 的专家扇出运行器。
 
-    通过 BaseAgent 继承的 AgentBase.__call__() 调用专家，并保持项目
+    通过 BaseAgent.reply() 调用专家，并保持项目
     业务契约仍然是 analyze(stock_code) -> Signal。
     """
 
@@ -237,7 +237,7 @@ class AgentScopeOrchestrationRunner:
             )
 
     async def _analyze_agent(self, scope: StockAnalysisScope, agent: BaseAgent) -> Signal:
-        """Invoke one expert through its native AgentScope __call__."""
+        """Invoke one expert through its native AgentScope reply() boundary."""
         task_msg = stock_task_to_msg(
             scope.stock_code,
             context={
@@ -246,7 +246,7 @@ class AgentScopeOrchestrationRunner:
                 "signal_type": agent.signal_type,
             },
         )
-        result_msg = await agent(task_msg)
+        result_msg = await agent.reply(task_msg)
         return msg_to_signal(result_msg)
 
     def _run_coroutine_sync(self, coroutine):

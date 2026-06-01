@@ -10,7 +10,7 @@ akshare>=1.18.0
 # tencent-stock  # 腾讯自选股API（待定）
 
 # Utilities
-agentscope>=1.0.0
+agentscope>=2.0.0,<3.0.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
 loguru>=0.7.0

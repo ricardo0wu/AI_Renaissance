@@ -150,12 +150,12 @@ class OrchestratorAgentScopeIntegrationTest(unittest.TestCase):
         self.assertEqual(result.scope_trace["framework"], "AgentScope")
         self.assertEqual(result.scope_trace["summary"]["success_count"], 3)
 
-    def test_orchestrator_is_agentscope_callable(self):
+    def test_orchestrator_replies_through_agentscope_boundary(self):
         orchestrator = OrchestratorAgent(config={"confidence_threshold": 0.6, "agent_timeout_seconds": 1})
         orchestrator.register_expert(MockAgent("financial", "bullish", 0.8))
         task_msg = stock_task_to_msg("600519")
 
-        result_msg = asyncio.run(orchestrator(task_msg))
+        result_msg = asyncio.run(orchestrator.reply(task_msg))
 
         result_data = result_msg.metadata["arbitration_result"]
         self.assertEqual(result_msg.name, "OrchestratorAgent")

@@ -147,13 +147,13 @@ AI Renaissance 要做的，不是再造一座封闭的量化圣殿。而是把�
 
 | 模块 | 当前状态 |
 |------|----------|
-| Agent / Signal 基础框架 | 已有 AgentScope-native `BaseAgent`、统一 `Signal`、专家 Agent 目录和主流程注册表 |
+| Agent / Signal 基础框架 | 已有 AgentScope 2.0 `reply()` 边界的 `BaseAgent`、统一 `Signal`、专家 Agent 目录和主流程注册表 |
 | Orchestrator | 已有编排 Agent 和仲裁引擎，可以收集专家 Signal 并跑通初步仲裁流程 |
 | 舆情 Agent | 已有初步实现，能编排大盘情绪、行业景气和东方财富股吧数据，输出舆情类 Signal |
 | 财务/技术/资金/宏观/行业/风险 Agent | 目前主要是接入骨架和占位输出，专业判断逻辑还需要各专家组继续补齐 |
 | 数据层 | 已有东方财富、股吧、巨潮、AkShare、市场情绪等数据源模块，字段稳定性和覆盖范围仍需联调 |
 | CI | 已接入依赖检查、pytest、compileall、专家 Agent 契约检查、Orchestrator 仲裁契约检查、AgentScope 消息桥检查和 BaseAgent 原生调用检查 |
-| AgentScope | `BaseAgent` 已继承 AgentScope `AgentBase`；Orchestrator 通过 AgentScope `Msg` 调用专家 Agent，并可把仲裁结果包装为 AgentScope `Msg` |
+| AgentScope | `BaseAgent` 已提供 AgentScope 2.0 `reply()` 消息边界；Orchestrator 通过 AgentScope `Msg` 调用专家 Agent，并可把仲裁结果包装为 AgentScope `Msg` |
 
 近期更现实的目标是：先让各专家 Agent 以离线可测的方式稳定返回 `Signal`，再逐步补齐专业规则、数据源和仲裁逻辑。
 
@@ -227,7 +227,7 @@ python -m pytest -q
 python main.py --stock 000001
 ```
 
-主流程会将股票任务包装成 AgentScope `Msg`，通过专家 Agent 继承自 `BaseAgent` 的 AgentScope `__call__()` 收集 `Signal`，再交给 Orchestrator 仲裁。
+主流程会将股票任务包装成 AgentScope `Msg`，通过专家 Agent 的 `BaseAgent.reply()` 边界收集 `Signal`，再交给 Orchestrator 仲裁。
 
 ### 4. 检查 Agent 接入状态
 
