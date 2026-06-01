@@ -8,9 +8,12 @@ LLM 分支只搭建 AgentScope Model、Skill、MCP 的调用框架，
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,76 +122,90 @@ class ConfiguredSkillProvider:
         return path
 
 
+def run_awaitable_sync(value: Any) -> Any:
+    """Run an AgentScope async API from the project's synchronous boundary."""
+    if not inspect.isawaitable(value):
+        return value
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+
+    result_holder: Dict[str, Any] = {}
+    error_holder: Dict[str, BaseException] = {}
+
+    def runner() -> None:
+        try:
+            result_holder["result"] = asyncio.run(value)
+        except BaseException as exc:  # pragma: no cover - defensive bridge
+            error_holder["error"] = exc
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "error" in error_holder:
+        raise error_holder["error"]
+    return result_holder["result"]
+
+
 class MCPToolProvider(Protocol):
     """MCP 工具注册接口。"""
 
-    def register_tools(self, toolkit: Any) -> Dict[str, Any]:
-        """把 MCP 工具注册进 AgentScope Toolkit，并返回追踪信息。"""
+    def load_mcp_clients(self) -> Tuple[List[Any], Dict[str, Any]]:
+        """创建 AgentScope MCP 客户端，并返回 Toolkit 构造参数和追踪信息。"""
 
 
 class ConfiguredMCPToolProvider:
-    """根据配置创建 AgentScope MCP 客户端并注册工具。"""
+    """根据配置创建 AgentScope MCP 客户端并生成工具追踪。"""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
 
-    def register_tools(self, toolkit: Any) -> Dict[str, Any]:
+    def load_mcp_clients(self) -> Tuple[List[Any], Dict[str, Any]]:
         servers = self.config.get("mcp_servers")
         if not servers:
             raise LLMArbitrationConfigurationError("llm_framework 需要配置 orchestrator.llm_arbitration.mcp_servers")
 
         try:
-            from agentscope.mcp import HttpStatefulClient, HttpStatelessClient, StdIOStatefulClient
+            from agentscope.mcp import MCPClient, HttpMCPConfig, StdioMCPConfig
         except Exception as exc:
             raise LLMArbitrationConfigurationError(f"AgentScope MCP 模块不可用：{exc}") from exc
 
+        clients = []
         registered_tools = []
         server_traces = []
 
         for server_config in servers:
-            client = self._create_client(server_config, HttpStatefulClient, HttpStatelessClient, StdIOStatefulClient)
+            client = self._create_client(server_config, MCPClient, HttpMCPConfig, StdioMCPConfig)
+            clients.append(client)
             try:
-                tools = client.list_tools()
+                if getattr(client, "is_stateful", False):
+                    run_awaitable_sync(client.connect())
+                tools = run_awaitable_sync(client.list_tools())
             except Exception as exc:
                 name = server_config.get("name", "未命名MCP")
                 raise LLMArbitrationExecutionError(f"MCP 工具列表读取失败：{name}: {exc}") from exc
 
+            tool_names = [getattr(tool, "name", "") for tool in tools if getattr(tool, "name", "")]
             server_trace = {
                 "name": server_config.get("name", ""),
                 "transport": server_config.get("transport", ""),
-                "tool_count": len(tools),
-                "tools": [],
+                "tool_count": len(tool_names),
+                "tools": tool_names,
             }
-
-            for tool in tools:
-                tool_name = getattr(tool, "name", "")
-                if not tool_name:
-                    continue
-                callable_tool = client.get_callable_function(
-                    tool_name,
-                    wrap_tool_result=True,
-                    execution_timeout=server_config.get("execution_timeout"),
-                )
-                toolkit.register_tool_function(
-                    callable_tool,
-                    func_name=tool_name,
-                    func_description=getattr(tool, "description", "") or f"MCP 工具：{tool_name}",
-                    json_schema=getattr(tool, "inputSchema", None),
-                    namesake_strategy="rename",
-                )
-                registered_tools.append(tool_name)
-                server_trace["tools"].append(tool_name)
-
+            registered_tools.extend(tool_names)
             server_traces.append(server_trace)
 
-        return {"servers": server_traces, "tools": registered_tools}
+        return clients, {"servers": server_traces, "tools": registered_tools}
 
     def _create_client(
         self,
         server_config: Dict[str, Any],
-        http_stateful_cls: Any,
-        http_stateless_cls: Any,
-        stdio_cls: Any,
+        mcp_client_cls: Any,
+        http_config_cls: Any,
+        stdio_config_cls: Any,
     ) -> Any:
         name = server_config.get("name")
         transport = server_config.get("transport")
@@ -199,53 +216,57 @@ class ConfiguredMCPToolProvider:
             command = server_config.get("command")
             if not command:
                 raise LLMArbitrationConfigurationError(f"MCP stdio 配置缺少 command：{name}")
-            return stdio_cls(
-                name=name,
+            mcp_config = stdio_config_cls(
                 command=command,
                 args=server_config.get("args"),
                 env=server_config.get("env"),
                 cwd=server_config.get("cwd"),
             )
-
-        if transport in ("streamable_http", "sse"):
+            is_stateful = bool(server_config.get("stateful", True))
+        elif transport in ("streamable_http", "http", "sse"):
             url = server_config.get("url")
             if not url:
                 raise LLMArbitrationConfigurationError(f"MCP HTTP 配置缺少 url：{name}")
-            client_cls = http_stateful_cls if server_config.get("stateful") else http_stateless_cls
-            return client_cls(
-                name=name,
-                transport=transport,
+            mcp_config = http_config_cls(
                 url=url,
                 headers=server_config.get("headers"),
                 timeout=server_config.get("timeout", 30),
-                sse_read_timeout=server_config.get("sse_read_timeout", 300),
             )
+            is_stateful = bool(server_config.get("stateful", False))
+        else:
+            raise LLMArbitrationConfigurationError(f"不支持的 MCP transport：{transport}")
 
-        raise LLMArbitrationConfigurationError(f"不支持的 MCP transport：{transport}")
+        return mcp_client_cls(
+            name=name,
+            is_stateful=is_stateful,
+            mcp_config=mcp_config,
+            enable_tools=server_config.get("enable_tools"),
+            disable_tools=server_config.get("disable_tools"),
+            execution_timeout=server_config.get("execution_timeout"),
+        )
 
 
 class AgentScopeLLMArbitrationAgent:
-    """AgentScope ReActAgent 的轻量包装。"""
+    """AgentScope 2.0 Agent 的轻量包装。"""
 
     def __init__(self, agent: Any):
         self.agent = agent
 
     def run(self, payload: Dict[str, Any]) -> Any:
         try:
-            from agentscope.message import Msg
+            from agentscope.message import UserMsg
         except Exception as exc:
             raise LLMArbitrationConfigurationError(f"AgentScope message 模块不可用：{exc}") from exc
 
-        msg = Msg(
+        msg = UserMsg(
             name="OrchestratorAgent",
-            role="user",
             content=json.dumps(payload, ensure_ascii=False, indent=2),
         )
 
         try:
-            response = self.agent(msg)
+            response = run_awaitable_sync(self.agent.reply(msg))
         except Exception as exc:
-            raise LLMArbitrationExecutionError(f"AgentScope ReActAgent 执行失败：{exc}") from exc
+            raise LLMArbitrationExecutionError(f"AgentScope Agent 执行失败：{exc}") from exc
 
         if hasattr(response, "get_text_content"):
             return response.get_text_content()
@@ -257,20 +278,17 @@ class AgentScopeLLMArbitrationAgentFactory:
 
     def create(self, config: Dict[str, Any], toolkit: Any) -> AgentScopeLLMArbitrationAgent:
         try:
-            from agentscope.agent import ReActAgent
+            from agentscope.agent import Agent, ReActConfig
         except Exception as exc:
             raise LLMArbitrationConfigurationError(f"AgentScope agent 模块不可用：{exc}") from exc
 
         model = create_agentscope_model(config.get("model", {}))
-        formatter = create_agentscope_formatter(config.get("model", {}))
-        agent = ReActAgent(
+        agent = Agent(
             name=config.get("agent_name", "LLMArbitrationAgent"),
-            sys_prompt=build_llm_arbitration_system_prompt(),
+            system_prompt=build_llm_arbitration_system_prompt(),
             model=model,
-            formatter=formatter,
             toolkit=toolkit,
-            parallel_tool_calls=bool(config.get("parallel_tool_calls", True)),
-            max_iters=int(config.get("max_iters", 6)),
+            react_config=ReActConfig(max_iters=int(config.get("max_iters", 6))),
         )
         return AgentScopeLLMArbitrationAgent(agent)
 
@@ -286,61 +304,92 @@ def create_agentscope_model(model_config: Dict[str, Any]) -> Any:
         raise LLMArbitrationConfigurationError("模型配置必须包含 provider 和 model_name")
 
     api_key = _expand_env_value(model_config.get("api_key"))
-    generate_kwargs = model_config.get("generate_kwargs")
     client_kwargs = model_config.get("client_kwargs", {}).copy()
     base_url = model_config.get("base_url")
     if base_url:
         client_kwargs["base_url"] = base_url
 
     try:
+        from agentscope.credential import DashScopeCredential, OllamaCredential, OpenAICredential
         from agentscope.model import DashScopeChatModel, OllamaChatModel, OpenAIChatModel
     except Exception as exc:
         raise LLMArbitrationConfigurationError(f"AgentScope model 模块不可用：{exc}") from exc
 
+    stream = bool(model_config.get("stream", True))
+    max_retries = int(model_config.get("max_retries", 3))
+    context_size = model_config.get("context_size")
+
     if provider == "ollama":
-        return OllamaChatModel(
-            model_name=model_name,
-            host=model_config.get("host"),
-            options=model_config.get("options"),
-            generate_kwargs=generate_kwargs,
-        )
+        kwargs = {
+            "credential": OllamaCredential(host=model_config.get("host")) if model_config.get("host") else None,
+            "model": model_name,
+            "parameters": _create_model_parameters(OllamaChatModel, model_config),
+            "stream": stream,
+            "max_retries": max_retries,
+        }
+        if context_size:
+            kwargs["context_size"] = int(context_size)
+        return OllamaChatModel(**kwargs)
 
     if provider == "dashscope":
         if not api_key:
             raise LLMArbitrationConfigurationError("DashScope 模型配置缺少 api_key")
-        return DashScopeChatModel(
-            model_name=model_name,
-            api_key=api_key,
-            generate_kwargs=generate_kwargs,
-            base_http_api_url=base_url,
-        )
+        kwargs = {
+            "credential": DashScopeCredential(
+                api_key=api_key,
+                base_url=base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+            "model": model_name,
+            "parameters": _create_model_parameters(DashScopeChatModel, model_config),
+            "stream": stream,
+            "max_retries": max_retries,
+        }
+        if context_size:
+            kwargs["context_size"] = int(context_size)
+        return DashScopeChatModel(**kwargs)
 
     if provider in ("openai", "openai_compatible"):
         if not api_key:
             raise LLMArbitrationConfigurationError("OpenAI 模型配置缺少 api_key")
-        return OpenAIChatModel(
-            model_name=model_name,
-            api_key=api_key,
-            client_kwargs=client_kwargs or None,
-            generate_kwargs=generate_kwargs,
-        )
+        kwargs = {
+            "credential": OpenAICredential(
+                api_key=api_key,
+                organization=client_kwargs.get("organization"),
+                base_url=client_kwargs.get("base_url"),
+            ),
+            "model": model_name,
+            "parameters": _create_model_parameters(OpenAIChatModel, model_config),
+            "stream": stream,
+            "max_retries": max_retries,
+        }
+        if context_size:
+            kwargs["context_size"] = int(context_size)
+        return OpenAIChatModel(**kwargs)
 
     raise LLMArbitrationConfigurationError(f"不支持的模型 provider：{provider}")
 
 
-def create_agentscope_formatter(model_config: Dict[str, Any]) -> Any:
-    """根据模型 provider 创建 AgentScope Formatter。"""
-    provider = model_config.get("provider", "").lower()
-    try:
-        from agentscope.formatter import DashScopeChatFormatter, OllamaChatFormatter, OpenAIChatFormatter
-    except Exception as exc:
-        raise LLMArbitrationConfigurationError(f"AgentScope formatter 模块不可用：{exc}") from exc
+def _create_model_parameters(model_cls: Any, model_config: Dict[str, Any]) -> Any:
+    parameters_cls = getattr(model_cls, "Parameters", None)
+    fields = getattr(parameters_cls, "model_fields", None)
+    if parameters_cls is None or not isinstance(fields, dict):
+        return None
 
-    if provider == "dashscope":
-        return DashScopeChatFormatter()
-    if provider in ("openai", "openai_compatible"):
-        return OpenAIChatFormatter()
-    return OllamaChatFormatter()
+    raw_parameters: Dict[str, Any] = {}
+    for key in ("generate_kwargs", "options", "parameters"):
+        value = model_config.get(key)
+        if isinstance(value, dict):
+            raw_parameters.update(value)
+
+    if "parallel_tool_calls" in model_config:
+        raw_parameters["parallel_tool_calls"] = model_config["parallel_tool_calls"]
+    if "enable_thinking" in raw_parameters and "thinking_enable" in fields:
+        raw_parameters["thinking_enable"] = raw_parameters.pop("enable_thinking")
+
+    filtered = {key: value for key, value in raw_parameters.items() if key in fields}
+    if not filtered:
+        return None
+    return parameters_cls(**filtered)
 
 
 def build_llm_arbitration_system_prompt() -> str:
@@ -365,7 +414,7 @@ class LLMArbitrationStrategy:
         skill_provider: Optional[SkillProvider] = None,
         mcp_tool_provider: Optional[MCPToolProvider] = None,
         agent_factory: Optional[Any] = None,
-        toolkit_factory: Optional[Callable[[], Any]] = None,
+        toolkit_factory: Optional[Callable[..., Any]] = None,
     ):
         self.config = config
         self.skill_provider = skill_provider or ConfiguredSkillProvider(config)
@@ -384,9 +433,9 @@ class LLMArbitrationStrategy:
         skills = self.skill_provider.load_skills()
         if not skills:
             raise LLMArbitrationConfigurationError("llm_framework 至少需要加载一个仲裁 Skill")
-        toolkit = self._create_toolkit()
-        self._register_skill_tools(toolkit, skills)
-        mcp_trace = self.mcp_tool_provider.register_tools(toolkit)
+        skill_tools = self._create_skill_tools(skills)
+        mcp_clients, mcp_trace = self.mcp_tool_provider.load_mcp_clients()
+        toolkit = self._create_toolkit(tools=skill_tools, mcps=mcp_clients)
 
         agent = self.agent_factory.create(self.config, toolkit)
         payload = self._build_payload(signal_bundle, execution_trace or {}, skills, mcp_trace)
@@ -405,16 +454,26 @@ class LLMArbitrationStrategy:
         result.scope_trace = trace
         return result
 
-    def _create_toolkit(self) -> Any:
+    def _create_toolkit(
+        self,
+        *,
+        tools: Optional[List[Any]] = None,
+        mcps: Optional[List[Any]] = None,
+    ) -> Any:
         if self.toolkit_factory:
-            return self.toolkit_factory()
+            return self.toolkit_factory(tools=tools or [], mcps=mcps or [])
         try:
             from agentscope.tool import Toolkit
         except Exception as exc:
             raise LLMArbitrationConfigurationError(f"AgentScope Toolkit 不可用：{exc}") from exc
-        return Toolkit()
+        return Toolkit(tools=tools or [], mcps=mcps or [])
 
-    def _register_skill_tools(self, toolkit: Any, skills: List[ArbitrationSkill]) -> None:
+    def _create_skill_tools(self, skills: List[ArbitrationSkill]) -> List[Any]:
+        try:
+            from agentscope.tool import FunctionTool
+        except Exception as exc:
+            raise LLMArbitrationConfigurationError(f"AgentScope FunctionTool 不可用：{exc}") from exc
+
         skill_map = {skill.name: skill for skill in skills}
 
         def list_arbitration_skills() -> str:
@@ -428,18 +487,20 @@ class LLMArbitrationStrategy:
                 raise LLMArbitrationExecutionError(f"Skill 未加载：{skill_name}")
             return skill.content
 
-        toolkit.register_tool_function(
-            list_arbitration_skills,
-            func_name="list_arbitration_skills",
-            func_description="列出 LLM 仲裁框架已加载的 Skill",
-            namesake_strategy="rename",
-        )
-        toolkit.register_tool_function(
-            get_arbitration_skill,
-            func_name="get_arbitration_skill",
-            func_description="读取指定 LLM 仲裁 Skill 的完整内容",
-            namesake_strategy="rename",
-        )
+        return [
+            FunctionTool(
+                list_arbitration_skills,
+                name="list_arbitration_skills",
+                description="列出 LLM 仲裁框架已加载的 Skill",
+                is_read_only=True,
+            ),
+            FunctionTool(
+                get_arbitration_skill,
+                name="get_arbitration_skill",
+                description="读取指定 LLM 仲裁 Skill 的完整内容",
+                is_read_only=True,
+            ),
+        ]
 
     def _build_payload(
         self,

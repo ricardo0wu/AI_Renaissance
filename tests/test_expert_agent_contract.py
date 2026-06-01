@@ -1,10 +1,6 @@
 import importlib
 
 import pytest
-try:
-    from agentscope.agent import AgentBase as AgentScopeAgentBase
-except ModuleNotFoundError:
-    from agentscope.agents import AgentBase as AgentScopeAgentBase
 
 from agents.signal import Signal
 from main import EXPERT_AGENTS
@@ -16,7 +12,7 @@ def test_registered_expert_agent_can_run_offline(agent_name, agent_info, offline
     agent_class = getattr(module, agent_info["class"])
     agent = agent_class(config=offline_config(agent_info["signal_type"]))
 
-    assert isinstance(agent, AgentScopeAgentBase)
+    assert callable(agent.reply)
     signal = agent.analyze("000001")
 
     assert isinstance(signal, Signal)

@@ -43,7 +43,7 @@ def test_stock_task_msg_uses_real_agentscope_msg_when_available():
     msg = stock_task_to_msg("600519", context={"source": "real-msg"})
 
     assert msg.role == "user"
-    assert msg.content == "Analyze stock 600519"
+    assert msg.get_text_content() == "Analyze stock 600519"
     assert extract_stock_code(msg) == "600519"
     assert msg.metadata["context"] == {"source": "real-msg"}
 

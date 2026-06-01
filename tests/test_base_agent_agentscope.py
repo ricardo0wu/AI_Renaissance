@@ -1,10 +1,6 @@
 import asyncio
 
 import pytest
-try:
-    from agentscope.agent import AgentBase as AgentScopeAgentBase
-except ModuleNotFoundError:
-    from agentscope.agents import AgentBase as AgentScopeAgentBase
 
 from agents.agentscope_message import msg_to_signal, stock_task_to_msg
 from agents.base import AgentContractError, BaseAgent
@@ -40,17 +36,17 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_base_agent_is_agentscope_native_agent():
+def test_base_agent_exposes_agentscope_reply_boundary():
     agent = MockExpertAgent()
 
-    assert isinstance(agent, AgentScopeAgentBase)
+    assert callable(agent.reply)
 
 
-def test_base_agent_can_be_called_through_agentscope_call_protocol():
+def test_base_agent_can_be_called_through_agentscope_reply_protocol():
     agent = MockExpertAgent()
     task_msg = stock_task_to_msg("600519", context={"source": "unit-test"})
 
-    result_msg = run(agent(task_msg))
+    result_msg = run(agent.reply(task_msg))
     signal = msg_to_signal(result_msg)
 
     assert isinstance(signal, Signal)
@@ -85,7 +81,7 @@ def test_news_agent_runs_through_agentscope_native_call_offline(fake_news_source
     )
     task_msg = stock_task_to_msg("600519", context={"source": "offline-news-test"})
 
-    result_msg = run(news_agent(task_msg))
+    result_msg = run(news_agent.reply(task_msg))
     signal = msg_to_signal(result_msg)
 
     assert isinstance(signal, Signal)

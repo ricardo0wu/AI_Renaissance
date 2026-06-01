@@ -33,7 +33,7 @@
 ### Agent 基类（开发1组维护）
 
 `agents/base.py` — `BaseAgent` 提供：
-- 继承 AgentScope `AgentBase`，为专家 Agent 统一实现 `reply()` / `observe()` / `handle_interrupt()`
+- AgentScope 2.0 `reply()` 消息边界，并为专家 Agent 统一实现 `observe()` / `handle_interrupt()`
 - `signal_type` 类属性：标识 Agent 输出的信号类型
 - `load_skill()` / `load_skills_from_domain()`：动态加载 Skill
 - `list_skills()` / `get_skill()`：Skill 管理

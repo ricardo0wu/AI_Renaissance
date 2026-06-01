@@ -147,15 +147,15 @@ AI Renaissance 要做的，不是再造一座封闭的量化圣殿。而是把�
 
 | 模块 | 当前状态 |
 |------|----------|
-| Agent / Signal 基础框架 | 已有 AgentScope-native `BaseAgent`、统一 `Signal`、专家 Agent 注册表和主流程调用链路 |
-| Orchestrator | 已有编排 Agent、仲裁引擎、执行追踪和 AgentScope 消息调用链路 |
+| Agent / Signal 基础框架 | 已有 AgentScope 2.0 `reply()` 边界的 `BaseAgent`、统一 `Signal`、专家 Agent 注册表和主流程调用链路 |
+| Orchestrator | 已有编排 Agent、仲裁引擎、执行追踪和 AgentScope 2.0 消息调用链路 |
 | 舆情 Agent | 已有业务实现，能编排大盘情绪、行业情绪和东方财富股吧数据，输出舆情类 Signal |
 | 宏观 Agent | 已有 7 层宏观分析流水线和推理链，可离线返回 macro Signal；当前使用基于 2024-06-28 真实宏观数据整理的固定样本 |
 | 技术 Agent | 已接入 `traditional_model_fusion`、`volume_price_reversal` 和 `company_evolution_analysis`，可通过真实/注入 OHLCV 数据输出 technical Signal |
 | 财务/资金/行业/风险 Agent | 当前能接入主流程并返回标准 Signal；`FinancialAgent`、`FundflowAgent`、`IndustryAgent`、`RiskAgent` 的 `analyze()` 仍返回占位 neutral Signal |
 | 数据层 | 已有东方财富、股吧、市场情绪、行业情绪、巨潮、AkShare、Market OHLCV、腾讯行情等数据源模块 |
 | CI | 已接入依赖检查、pytest、compileall、专家 Agent 契约检查、Orchestrator 仲裁契约检查、AgentScope 消息桥检查和 BaseAgent 原生调用检查；当前 compileall 覆盖 `main.py`、`agents`、`data_sources`、`debug_ui`、`samples`、`tests`，不代表所有 `skills/` 下的实验脚本都会被编译或执行 |
-| AgentScope | `BaseAgent` 已继承 AgentScope `AgentBase`；Orchestrator 通过 AgentScope `Msg` 调用专家 Agent，并可把仲裁结果包装为 AgentScope `Msg` |
+| AgentScope | `BaseAgent` 已提供 AgentScope 2.0 `reply()` 消息边界；Orchestrator 通过 AgentScope `Msg` 调用专家 Agent，并可把仲裁结果包装为 AgentScope `Msg` |
 
 下一阶段重点是：在保持统一运行契约稳定的前提下，继续补齐各专家 Agent 的业务逻辑、实时数据源和信号有效性验证。
 
@@ -229,7 +229,7 @@ python -m pytest -q
 python main.py --stock 000001
 ```
 
-主流程会将股票任务包装成 AgentScope `Msg`，通过专家 Agent 继承自 `BaseAgent` 的 AgentScope `__call__()` 收集 `Signal`，再交给 Orchestrator 仲裁。
+主流程会将股票任务包装成 AgentScope `Msg`，通过专家 Agent 的 `BaseAgent.reply()` 边界收集 `Signal`，再交给 Orchestrator 仲裁。
 
 ### 4. 检查 Agent 接入状态
 
